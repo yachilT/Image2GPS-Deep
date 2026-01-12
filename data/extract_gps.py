@@ -89,7 +89,7 @@ def process_folder(source_folder, target_folder, output_csv):
                     print(f"Skipped (No GPS): {filename}")
 
 # --- SETTINGS ---
-src = "18.12.25-Tom" 
+src = "snapshots/11.1.26-Roi" 
 dst = "./indexed_photos"
 csv_name = "photo_locations.csv"
 
