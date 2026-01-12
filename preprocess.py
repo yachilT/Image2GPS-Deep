@@ -4,8 +4,7 @@ from typing import Tuple
 
 import torch
 from torch.utils.data import Dataset
-from PIL import Image
-from torchvision import transforms
+from PIL import Image, ImageOps
 from torchvision.transforms import v2
 
 class CampusGPSDataset(Dataset):
@@ -56,7 +55,8 @@ class CampusGPSDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         img_path, lat, lon = self.samples[idx]
 
-        img = Image.open(img_path).convert("RGB")
+        img = Image.open(img_path)
+        img = ImageOps.exif_transpose(img).convert("RGB")
         if self.transform:
             img = self.transform(img)
             
