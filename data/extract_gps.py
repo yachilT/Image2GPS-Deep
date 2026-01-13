@@ -88,10 +88,14 @@ def process_folder(source_folder, target_folder, output_csv):
                 else:
                     print(f"Skipped (No GPS): {filename}")
 
-# --- SETTINGS ---
-src = "snapshots/11.1.26-Roi" 
-dst = "./indexed_photos"
-csv_name = "photo_locations.csv"
+def main():
+    # --- SETTINGS ---
+    src = "snapshots/11.1.26-Roi" 
+    dst = "./indexed_photos"
+    csv_name = "photo_locations.csv"
 
-process_folder(src, dst, csv_name)
-print(f"\nProcessing complete. Photos moved to '{dst}' and logged in '{csv_name}'")
+    process_folder(src, dst, csv_name)
+    print(f"\nProcessing complete. Photos moved to '{dst}' and logged in '{csv_name}'")
+
+if __name__ == "__main__":
+    main()
