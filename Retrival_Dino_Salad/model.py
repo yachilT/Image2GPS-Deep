@@ -168,30 +168,63 @@ class SaladFaissGPSDB:
         emb = self.embed(image)
         return self.query_embedding(emb, k=k)
 
-    def predict_gps(self, image: torch.Tensor, k: int = 5, weighted: bool = True, eps: float = 1e-6) -> Tuple[float, float]:
+    def predict_gps(
+        self,
+        image: torch.Tensor,
+        k: int = 5,
+        weighted: bool = True,
+        eps: float = 1e-6,
+    ) -> Tuple[float, float]:
         matches = self.query_image(image, k=k)
-        gps = np.array([m.gps for m in matches], dtype=np.float64)  # [k,2]
-
         if len(matches) == 0:
             raise RuntimeError("No matches found (index empty?).")
 
-        if not weighted or len(matches) == 1:
+        gps = np.array([m.gps for m in matches], dtype=np.float64)  # [k,2] lat,lon
+        if (not weighted) or len(matches) == 1:
             pred = gps.mean(axis=0)
             return float(pred[0]), float(pred[1])
 
         scores = np.array([m.score for m in matches], dtype=np.float64)
 
+        # ---- 1) Score-based weights (your current logic) ----
         if self.use_cosine:
-            # similarity: larger is better; make weights non-negative
-            w = scores - scores.min()
-            w = w + eps
+            w_score = scores - scores.min()
+            w_score = w_score + eps
         else:
-            # L2 distance: smaller is better; invert
-            w = 1.0 / (scores + eps)
+            w_score = 1.0 / (scores + eps)
 
-        w = w / w.sum()
+        # ---- 2) GPS-consensus weights (leave-one-out + robust scale) ----
+        def haversine_m(lat1, lon1, lat2, lon2):
+            from math import radians, sin, cos, sqrt, atan2
+            R = 6371000.0
+            lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+            a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+            c = 2 * atan2(sqrt(a), sqrt(1 - a))
+            return R * c
+
+        k_eff = gps.shape[0]
+        total = gps.sum(axis=0)
+
+        d = np.empty(k_eff, dtype=np.float64)
+        for i in range(k_eff):
+            mu_loo = (total - gps[i]) / max(k_eff - 1, 1)
+            d[i] = haversine_m(gps[i, 0], gps[i, 1], mu_loo[0], mu_loo[1])
+
+        # robust scale from the distances themselves
+        scale = np.median(d) + eps
+
+        # convert distance to weight (closer => larger)
+        w_gps = np.exp(- (d / scale) ** 2) + eps
+
+        # ---- 3) Combine and normalize ----
+        w = w_score * w_gps
+        w = w / (w.sum() + eps)
+
         pred = (gps * w[:, None]).sum(axis=0)
         return float(pred[0]), float(pred[1])
+
 
     # -----------------------------
     # Save / Load
