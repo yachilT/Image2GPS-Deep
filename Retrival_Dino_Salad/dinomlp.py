@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch.optim import AdamW
-from torch.amp import autocast, GradScaler
+from torch.amp import autocast
 from tqdm import tqdm
 
 class GPSPredictor(nn.Module):
@@ -71,7 +71,7 @@ class GPSPredictor(nn.Module):
         return torch.tanh(pred) / 2 + 0.5 # Scale to [0, 1]
     
 
-    def predict(self, images, device="cuda"):
+    def predict_gps(self, images, device="cuda"):
         """
         Args:
             model: The trained GPSPredictor.
@@ -91,7 +91,9 @@ class GPSPredictor(nn.Module):
             # Get normalized predictions [0, 1]
             preds_norm = self.forward(images)
             
-        return preds_norm
+            
+            
+        return (preds_norm[0][0].item(), preds_norm[0][1].item())
 
 def train_dinomlp(
     model,
