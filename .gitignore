@@ -2,3 +2,4 @@ data/indexed_photos/*
 data/snapshots/*
 salad_faiss_db*
 __pycache__/
+trained_models/*
