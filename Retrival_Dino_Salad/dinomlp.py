@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from torch.optim import AdamW
+from torch.cuda.amp import autocast, GradScaler
+from tqdm import tqdm
 
 class GPSPredictor(nn.Module):
     def __init__(self, feat_model, input_dim=8448, hidden_dim=2048, freeze_backbone=False):
@@ -15,10 +18,10 @@ class GPSPredictor(nn.Module):
         self.freeze_backbone = freeze_backbone
 
         if self.freeze_backbone:
-            for param in self.backbone.parameters():
-                param.requires_grad = False
-            self.backbone.eval()  # Freeze BatchNorm stats
-            print("Backbone frozen: Gradients will not be calculated.")
+            for p in self.feat_model.parameters():
+                p.requires_grad = False
+            self.feat_model.eval()
+
 
         # Block 1: Compress high-dim features
         self.layer1 = nn.Sequential(
@@ -50,10 +53,61 @@ class GPSPredictor(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
+        x = self.feat_model(x)
         x = self.layer1(x)
         x = self.layer2(x)
         pred = self.output(x)
         
-        # Force output to be in range [-1, 1] using Tanh
-        # This matches our normalized GPS labels
-        return torch.tanh(pred)
+        return torch.tanh(pred) / 2 + 0.5 # Scale to [0, 1]
+
+def train_dinomlp(
+    model,
+    train_loader,
+    val_loader,
+    epochs=10,
+    lr=2e-4,
+    weight_decay=1e-2,
+    smoothl1_beta=0.01,
+    max_grad_norm=1.0,
+    use_amp=True,
+    device="cuda"
+):
+    criterion = nn.SmoothL1Loss(beta=smoothl1_beta)
+    opt = AdamW([p for p in model.parameters() if p.requires_grad], lr=lr, weight_decay=weight_decay)
+
+    scaler = GradScaler(enabled=(use_amp and device == "cuda"))
+
+    def run_epoch(loader, train: bool):
+        model.train(train)
+        total, n = 0.0, 0
+
+        for imgs, gps in tqdm(loader, leave=False):
+            imgs = imgs.to(device, non_blocking=True)
+            gps  = gps.to(device, non_blocking=True).float()  # expected (B,2) in [0,1]
+
+            with autocast(enabled=scaler.is_enabled()):
+                pred = model(imgs)
+                loss = criterion(pred, gps)
+
+            if train:
+                opt.zero_grad(set_to_none=True)
+                scaler.scale(loss).backward()
+                if max_grad_norm is not None:
+                    scaler.unscale_(opt)
+                    nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                scaler.step(opt)
+                scaler.update()
+
+            bs = imgs.size(0)
+            total += float(loss.detach()) * bs
+            n += bs
+
+        return total / max(n, 1)
+
+    for ep in range(1, epochs + 1):
+        train_loss = run_epoch(train_loader, train=True)
+        with torch.no_grad():
+            val_loss = run_epoch(val_loader, train=False)
+        print(f"Epoch {ep:02d}/{epochs} | train loss: {train_loss:.6f} | val loss: {val_loss:.6f}")
+
+    return model
