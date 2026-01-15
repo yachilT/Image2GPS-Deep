@@ -127,7 +127,7 @@ class SaladFaissGPSDB:
         - DataLoader yielding (images[B,3,H,W], gps[B,2])
         - Dataset yielding   (image[3,H,W], gps[2])
         """
-        for batch_i, (images, gps_tensor) in tqdm(enumerate(dataloader)):
+        for batch_i, (images, gps_tensor) in enumerate(tqdm(dataloader)):
             # If dataset gives single sample: image [3,H,W], gps [2]
             if isinstance(images, torch.Tensor) and images.ndim == 3:
                 images = images.unsqueeze(0)  # -> [1,3,H,W]
