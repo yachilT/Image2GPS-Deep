@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch.optim import AdamW
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 
 class GPSPredictor(nn.Module):
@@ -51,14 +51,47 @@ class GPSPredictor(nn.Module):
             nn.init.kaiming_normal_(m.weight)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
+    
+    def train(self, mode=True):
+        super().train(mode)
+        if self.freeze_backbone:
+            self.feat_model.eval()
 
     def forward(self, x):
-        x = self.feat_model(x)
+        if self.freeze_backbone:
+            with torch.no_grad():
+                x = self.feat_model(x)
+        else:
+            x = self.feat_model(x)
+            
         x = self.layer1(x)
         x = self.layer2(x)
         pred = self.output(x)
         
         return torch.tanh(pred) / 2 + 0.5 # Scale to [0, 1]
+    
+
+    def predict(self, images, device="cuda"):
+        """
+        Args:
+            model: The trained GPSPredictor.
+            images: Tensor of shape (B, 3, H, W) or (3, H, W).
+            device: 'cuda' or 'cpu'.
+            
+        Returns:
+            numpy array of shape (B, 2) containing normalized GPS coords
+        """
+        
+        if images.ndim == 3:
+            images = images.unsqueeze(0) # [3, H, W] -> [1, 3, H, W]
+        
+        images = images.to(device)
+        
+        with torch.no_grad():
+            # Get normalized predictions [0, 1]
+            preds_norm = self.forward(images)
+            
+        return preds_norm
 
 def train_dinomlp(
     model,
@@ -75,39 +108,38 @@ def train_dinomlp(
     criterion = nn.SmoothL1Loss(beta=smoothl1_beta)
     opt = AdamW([p for p in model.parameters() if p.requires_grad], lr=lr, weight_decay=weight_decay)
 
-    scaler = GradScaler(enabled=(use_amp and device == "cuda"))
 
     def run_epoch(loader, train: bool):
         model.train(train)
-        total, n = 0.0, 0
+        total_loss, n = 0.0, 0
+        desc = "Train" if train else "Val"
 
-        for imgs, gps in tqdm(loader, leave=False):
+        for imgs, gps in tqdm(loader, desc=desc, leave=False):
             imgs = imgs.to(device, non_blocking=True)
-            gps  = gps.to(device, non_blocking=True).float()  # expected (B,2) in [0,1]
+            gps  = gps.to(device, non_blocking=True).float() # [B, 2] in range [0, 1]
 
-            with autocast(enabled=scaler.is_enabled()):
-                pred = model(imgs)
-                loss = criterion(pred, gps)
+            pred = model(imgs) 
+            loss = criterion(pred, gps)
 
             if train:
-                opt.zero_grad(set_to_none=True)
-                scaler.scale(loss).backward()
-                if max_grad_norm is not None:
-                    scaler.unscale_(opt)
-                    nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-                scaler.step(opt)
-                scaler.update()
+                opt.zero_grad(set_to_none=True)         
+                loss.backward()
+                opt.step()
 
             bs = imgs.size(0)
-            total += float(loss.detach()) * bs
+            total_loss += float(loss.detach()) * bs
             n += bs
 
-        return total / max(n, 1)
+        return total_loss / max(n, 1)
 
+    # --- Main Loop ---
     for ep in range(1, epochs + 1):
         train_loss = run_epoch(train_loader, train=True)
+        
         with torch.no_grad():
             val_loss = run_epoch(val_loader, train=False)
-        print(f"Epoch {ep:02d}/{epochs} | train loss: {train_loss:.6f} | val loss: {val_loss:.6f}")
+            
+        print(f"Epoch {ep:02d}/{epochs} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
 
     return model
+
