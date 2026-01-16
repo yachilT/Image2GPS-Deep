@@ -1,7 +1,7 @@
 import os
 import json
 from dataclasses import dataclass
-from typing import Optional, List, Tuple, Dict, Any, Callable
+from typing import Optional, List, Tuple, Union, Any, Callable
 
 import numpy as np
 import torch
@@ -42,7 +42,9 @@ class SaladFaissGPSDB:
         normalize: bool = True,
         use_cosine: bool = True,
         embedding_extractor: Optional[Callable[[Any], torch.Tensor]] = None,
+        k: int = 5,
     ):
+        self.k = k
         self.model = model.eval()
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
@@ -162,68 +164,99 @@ class SaladFaissGPSDB:
             matches.append(Match(idx=int(idx), score=float(score), gps=self.gps_list[idx]))
         return matches
 
-    def query_image(self, image: torch.Tensor, k: int = 5) -> List[Match]:
+    def query_image(self, image: torch.Tensor) -> List[Match]:
         if image.ndim == 3:
             image = image.unsqueeze(0)
         emb = self.embed(image)
-        return self.query_embedding(emb, k=k)
+        return self.query_embedding(emb, k=self.k)
 
     def predict_gps(
         self,
-        image: torch.Tensor,
-        k: int = 5,
+        images: torch.Tensor,          # [B,C,H,W]
         weighted: bool = True,
         eps: float = 1e-6,
-    ) -> Tuple[float, float]:
-        matches = self.query_image(image, k=k)
-        if len(matches) == 0:
-            raise RuntimeError("No matches found (index empty?).")
+        return_numpy: bool = False,
+    ) -> Union[torch.Tensor, np.ndarray]:
+        """
+        Batch version of predict_gps.
 
-        gps = np.array([m.gps for m in matches], dtype=np.float64)  # [k,2] lat,lon
-        if (not weighted) or len(matches) == 1:
-            pred = gps.mean(axis=0)
-            return float(pred[0]), float(pred[1])
+        Returns:
+            preds: [B,2] (lat, lon)
+        """
+        if images.dim() == 3:
+            # allow single image [C,H,W] -> [1,C,H,W]
+            images = images.unsqueeze(0)
+        if images.dim() != 4:
+            raise ValueError(f"Expected images [B,C,H,W] (or [C,H,W]), got {tuple(images.shape)}")
 
-        scores = np.array([m.score for m in matches], dtype=np.float64)
+        # We'll compute in numpy (your current logic uses numpy + python haversine)
+        # and return torch on the same device by default.
+        device = images.device
+        B = images.shape[0]
 
-        # ---- 1) Score-based weights (your current logic) ----
-        if self.use_cosine:
-            w_score = scores - scores.min()
-            w_score = w_score + eps
-        else:
-            w_score = 1.0 / (scores + eps)
-
-        # ---- 2) GPS-consensus weights (leave-one-out + robust scale) ----
-        def haversine_m(lat1, lon1, lat2, lon2):
-            from math import radians, sin, cos, sqrt, atan2
+        def haversine_m_np(lat1, lon1, lat2, lon2):
+            # vectorized haversine for numpy arrays
             R = 6371000.0
-            lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+            lat1 = np.radians(lat1)
+            lon1 = np.radians(lon1)
+            lat2 = np.radians(lat2)
+            lon2 = np.radians(lon2)
             dlat = lat2 - lat1
             dlon = lon2 - lon1
-            a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-            c = 2 * atan2(sqrt(a), sqrt(1 - a))
+            a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
+            c = 2.0 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
             return R * c
 
-        k_eff = gps.shape[0]
-        total = gps.sum(axis=0)
+        preds_np = np.zeros((B, 2), dtype=np.float64)
 
-        d = np.empty(k_eff, dtype=np.float64)
-        for i in range(k_eff):
-            mu_loo = (total - gps[i]) / max(k_eff - 1, 1)
-            d[i] = haversine_m(gps[i, 0], gps[i, 1], mu_loo[0], mu_loo[1])
+        for b in range(B):
+            matches = self.query_image(images[b])  # keeps your retrieval pipeline unchanged
+            if len(matches) == 0:
+                raise RuntimeError(f"No matches found for batch index {b} (index empty?).")
 
-        # robust scale from the distances themselves
-        scale = np.median(d) + eps
+            gps = np.array([m.gps for m in matches], dtype=np.float64)  # [k,2]
+            k_eff = gps.shape[0]
 
-        # convert distance to weight (closer => larger)
-        w_gps = np.exp(- (d / scale) ** 2) + eps
+            # unweighted or single match
+            if (not weighted) or k_eff == 1:
+                pred = gps.mean(axis=0)
+                preds_np[b] = pred
+                continue
 
-        # ---- 3) Combine and normalize ----
-        w = w_score * w_gps
-        w = w / (w.sum() + eps)
+            scores = np.array([m.score for m in matches], dtype=np.float64)
 
-        pred = (gps * w[:, None]).sum(axis=0)
-        return float(pred[0]), float(pred[1])
+            # ---- 1) Score-based weights ----
+            if self.use_cosine:
+                w_score = scores - scores.min()
+                w_score = w_score + eps
+            else:
+                w_score = 1.0 / (scores + eps)
+
+            # ---- 2) GPS-consensus weights (leave-one-out + robust scale) ----
+            total = gps.sum(axis=0)  # [2]
+            # leave-one-out mean for each i: (total - gps[i])/(k-1)
+            denom = max(k_eff - 1, 1)
+            mu_loo = (total[None, :] - gps) / denom  # [k,2]
+
+            d = haversine_m_np(
+                gps[:, 0], gps[:, 1],
+                mu_loo[:, 0], mu_loo[:, 1],
+            )  # [k]
+
+            scale = np.median(d) + eps
+            w_gps = np.exp(- (d / scale) ** 2) + eps
+
+            # ---- 3) Combine and normalize ----
+            w = w_score * w_gps
+            w = w / (w.sum() + eps)
+
+            pred = (gps * w[:, None]).sum(axis=0)  # [2]
+            preds_np[b] = pred
+
+        if return_numpy:
+            return preds_np
+
+        return torch.from_numpy(preds_np).to(device=device, dtype=torch.float32)
 
 
     # -----------------------------

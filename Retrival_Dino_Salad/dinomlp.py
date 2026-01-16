@@ -71,29 +71,36 @@ class GPSPredictor(nn.Module):
         return torch.tanh(pred) / 2 + 0.5 # Scale to [0, 1]
     
 
-    def predict_gps(self, images, device="cuda"):
+    @torch.no_grad()
+    def predict_gps(self, images, device="cuda", return_numpy=True):
         """
-        Args:
-            model: The trained GPSPredictor.
-            images: Tensor of shape (B, 3, H, W) or (3, H, W).
-            device: 'cuda' or 'cpu'.
-            
+        images: (B, 3, H, W) or (3, H, W)
+
         Returns:
-            numpy array of shape (B, 2) containing normalized GPS coords
+          - if input was (3,H,W): shape (2,)  (lat_norm, lon_norm)
+          - if input was (B,3,H,W): shape (B,2)
         """
-        
-        if images.ndim == 3:
-            images = images.unsqueeze(0) # [3, H, W] -> [1, 3, H, W]
-        
+        single = (images.ndim == 3)
+        if single:
+            images = images.unsqueeze(0)  # [1,3,H,W]
+
         images = images.to(device)
-        
-        with torch.no_grad():
-            # Get normalized predictions [0, 1]
-            preds_norm = self.forward(images)
-            
-            
-            
-        return (preds_norm[0][0].item(), preds_norm[0][1].item())
+
+        # IMPORTANT: put model in eval mode for inference (dropout/bn behavior)
+        was_training = self.training
+        self.eval()
+
+        preds_norm = self.forward(images)  # [B,2]
+
+        # restore mode (optional but nice)
+        if was_training:
+            self.train(True)
+
+        if return_numpy:
+            out = preds_norm.detach().cpu().numpy()
+            return out[0] if single else out
+        else:
+            return preds_norm[0] if single else preds_norm
 
 def train_dinomlp(
     model,
