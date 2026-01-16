@@ -6,7 +6,7 @@ from torch.amp import autocast
 from tqdm import tqdm
 
 class GPSPredictor(nn.Module):
-    def __init__(self, feat_model, input_dim=8448, hidden_dim=2048, freeze_backbone=False):
+    def __init__(self, feat_model, input_dim=8448, hidden_dim=2048, freeze_backbone=True):
         """
         Args:
             dino_salad_model: The pre-instantiated DINOv2 + SALAD model.
@@ -110,8 +110,6 @@ def train_dinomlp(
     lr=2e-4,
     weight_decay=1e-2,
     smoothl1_beta=0.01,
-    max_grad_norm=1.0,
-    use_amp=True,
     device="cuda"
 ):
     criterion = nn.SmoothL1Loss(beta=smoothl1_beta)
