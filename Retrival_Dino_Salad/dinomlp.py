@@ -93,7 +93,7 @@ class GPSPredictor(nn.Module):
             
             
             
-        return (preds_norm[0][0].item(), preds_norm[0][1].item())
+        return preds_norm
 
 def train_dinomlp(
     model,

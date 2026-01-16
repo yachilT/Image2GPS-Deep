@@ -67,6 +67,10 @@ class GPSRectNorm:
         self.lat_range = max(self.lat_max - self.lat_min, eps)
         self.lon_range = max(self.lon_max - self.lon_min, eps)
 
+        self.min_coords = np.array([self.lat_min, self.lon_min], dtype=np.float32)
+        self.max_coords = np.array([self.lat_max, self.lon_max], dtype=np.float32)
+        self.range = self.max_coords - self.min_coords
+
     def encode(self, lat, lon):
         lat_n = (float(lat) - self.lat_min) / self.lat_range
         lon_n = (float(lon) - self.lon_min) / self.lon_range
@@ -76,3 +80,9 @@ class GPSRectNorm:
         lat = self.lat_min + float(lat_n) * self.lat_range
         lon = self.lon_min + float(lon_n) * self.lon_range
         return lat, lon
+    
+    def encode_np(self, coords: np.ndarray):
+        return (coords - self.min_coords) / self.range
+
+    def decode_np(self, coords: np.ndarray):
+        return coords * self.range + self.min_coords 
