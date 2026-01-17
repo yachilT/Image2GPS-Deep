@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
 from tqdm import tqdm
+import os
 
 class SwiGLU(nn.Module):
     def __init__(self, dim_in, dim_hidden, dim_out, dropout=0.0):
@@ -131,9 +132,7 @@ class GPSPredictorMDN(nn.Module):
         x = self.trunk_ln(x)
 
         pi_logits = self.pi_head(self.pi_tower(x))
-        
         mu = self.mu_head(self.mu_tower(x)).view(-1, self.K, 2)
-        mu = torch.sigmoid(mu)
 
         L_params = self.L_head(self.cov_tower(x)).view(-1, self.K, 3)
 
@@ -158,6 +157,7 @@ class GPSPredictorMDN(nn.Module):
         self.eval()
 
         pi_logits, mu, _ = self.forward(images)
+        mu = torch.clamp(mu, 0.0, 1.0)
         pi = F.softmax(pi_logits, dim=-1)
 
         def to_out(gps_norm):
@@ -197,7 +197,7 @@ class GPSPredictorMDN(nn.Module):
             idx = torch.argmax(pi, dim=-1)
             gps_norm = mu[torch.arange(mu.size(0), device=mu.device), idx]
 
-        gps_out = to_out(gps_norm)
+        gps_out = gps_norm
 
         if was_training:
             self.train(True)
@@ -208,7 +208,7 @@ class GPSPredictorMDN(nn.Module):
         else:
             return gps_out[0] if single else gps_out
 
-    def mdn_loss(self, gps_norm_target, pi_logits, mu, L_params, min_diag=1e-4, max_diag=0.2):
+    def mdn_loss(self, gps_norm_target, pi_logits, mu, L_params, min_diag=1e-4, max_diag=1.0):
         return mdn_nll_fullcov_2d(
             target=gps_norm_target,
             pi_logits=pi_logits,
@@ -262,3 +262,46 @@ def train_dinomdn(
         print(f"Epoch {ep:02d}/{epochs} | Train NLL: {tr:.6f} | Val NLL: {va:.6f}")
 
     return model
+
+
+
+
+
+def get_dino_mdn(mlpmdn_head_path, GPS_norm, train_loader, val_loader):
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # 1. Load Backbone
+    print("Loading Salad model...")
+    dino_mdn = torch.hub.load("serizba/salad", "dinov2_salad")
+
+    # 2. Check Dimension automatically
+    dummy = torch.randn(1, 3, 224, 224)
+    with torch.no_grad():
+        out = dino_mdn(dummy)
+        # Salad might return a tuple or tensor. Ensure we get the tensor size.
+        if isinstance(out, tuple): out = out[0] 
+        feat_dim = out.shape[1]
+
+    print(f"Salad output dimension: {feat_dim}")
+
+    # 3. Initialize Model with correct dim
+    # Ensure GPS_norm is defined in your context before this
+    dinoMLPMDN_model = GPSPredictorMDN(dino_mdn, GPS_norm, input_dim=feat_dim).to(device)
+
+    print("Trainable params:", sum(p.numel() for p in dinoMLPMDN_model.parameters() if p.requires_grad))
+
+    # 4. Training / Loading Logic
+    if os.path.exists(mlpmdn_head_path):
+        print(f"Loading weights from {mlpmdn_head_path}...")
+        # strict=False is REQUIRED because we stripped the backbone weights
+        dinoMLPMDN_model.load_state_dict(torch.load(mlpmdn_head_path), strict=False)
+    else:
+        print("Starting training...")
+        dinoMLPMDN_model = train_dinomdn(dinoMLPMDN_model, train_loader, val_loader, epochs=15, device=device)
+        
+        # Save only the head weights (exclude frozen backbone)
+        head_weights = {k: v for k, v in dinoMLPMDN_model.state_dict().items() if "feat_model" not in k}
+        torch.save(head_weights, mlpmdn_head_path)
+        print("Model weights saved (head only).")
+    return dinoMLPMDN_model
