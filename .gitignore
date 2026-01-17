@@ -4,3 +4,5 @@ salad_faiss_db*
 __pycache__/
 trained_models/*
 *.sbatch
+jobs/*
+jobs

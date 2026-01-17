@@ -191,8 +191,6 @@ def get_dino_mlp(mlp_head_path, train_loader, val_loader) -> GPSPredictor:
     print("trainable params:", sum(p.numel() for p in dinoMLP_model.parameters() if p.requires_grad))
 
 
-
-
     if os.path.exists(mlp_head_path):
         print(f"Found MLP head at {mlp_head_path}! Loading...")
         dinoMLP_model.load_state_dict(torch.load(mlp_head_path), strict=False)
