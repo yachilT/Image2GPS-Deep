@@ -7,8 +7,12 @@ import torch
 from torch.utils.data import Dataset
 from PIL import Image, ImageOps
 from torchvision.transforms import v2
+from torch.utils.data import DataLoader, random_split 
 LAT_MIN, LAT_MAX = 31.26174, 31.2624
 LON_MIN, LON_MAX = 34.80081, 34.80454
+
+IMG_MEAN=[0.485, 0.456, 0.406]
+IMG_STD = [0.229, 0.224, 0.225]
 
 class CampusGPSDataset(Dataset):
     def __init__(self, csv_path, image_dir, transform=None, gps_normalizer=None, clamp_labels=True):
@@ -86,3 +90,25 @@ class GPSRectNorm:
 
     def decode_np(self, coords: np.ndarray):
         return coords * self.range + self.min_coords 
+
+
+def get_dataset():
+    
+    transform = v2.Compose([
+        v2.Resize((4004, 3010), interpolation=v2.InterpolationMode.BILINEAR),
+        v2.Resize((686,518), interpolation=v2.InterpolationMode.BILINEAR),
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=IMG_MEAN, std=IMG_STD)
+    ])
+
+    GPS_norm = GPSRectNorm()
+    full_dataset = CampusGPSDataset(csv_path="data/photo_locations.csv", image_dir="data/indexed_photos", transform=transform, gps_normalizer=GPS_norm)
+
+    train_size = int(0.8 * len(full_dataset))
+    val_size = len(full_dataset) - train_size
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size], generator=torch.Generator().manual_seed(42))
+
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+    return GPS_norm, full_dataset, train_dataset, val_dataset, train_loader, val_loader

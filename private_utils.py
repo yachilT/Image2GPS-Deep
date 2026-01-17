@@ -36,31 +36,46 @@ def denorm_gps(gps_norm):
 # -------------------------------------------------
 # Geographic distance (meters)
 # -------------------------------------------------
-def haversine_m(lat1, lon1, lat2, lon2):
+import numpy as np
+
+def haversine_distance(coords1: np.ndarray, coords2: np.ndarray):
     """
-    Great-circle distance in meters
+    Vectorized Haversine distance calculation.
+    
+    Args:
+        coords1: (N, 2) numpy array of [Latitude, Longitude]
+        coords2: (N, 2) numpy array of [Latitude, Longitude]
+        
+    Returns:
+        (N, 1) numpy array of distances in meters
     """
-    lat1, lon1, lat2, lon2 = map(
-        np.deg2rad, [lat1, lon1, lat2, lon2]
-    )
+    # Earth radius in meters
+    R = 6371000.0
+
+    # Convert degrees to radians
+    # Shape becomes (N, 2)
+    rads1 = np.radians(coords1)
+    rads2 = np.radians(coords2)
+
+    # Unpack columns: lat is index 0, lon is index 1
+    lat1, lon1 = rads1[:, 0], rads1[:, 1]
+    lat2, lon2 = rads2[:, 0], rads2[:, 1]
+
+    # Differences
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-    a = np.sin(dlat / 2.0) ** 2 + \
-        np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
-    c = 2.0 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
-    return 6371000.0 * c
 
+    # Haversine formula
+    a = np.sin(dlat / 2)**2 + \
+        np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
+    
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    
+    distance = R * c
 
-# -------------------------------------------------
-# Error computation
-# -------------------------------------------------
-def gps_error_m(pred_norm, gt_norm):
-    """
-    Compute error (meters) between normalized GPS points
-    """
-    pred_lat, pred_lon = denorm_gps(pred_norm)
-    gt_lat, gt_lon = denorm_gps(gt_norm)
-    return haversine_m(pred_lat, pred_lon, gt_lat, gt_lon)
+    # Reshape to (N, 1) as requested
+    return distance.reshape(-1, 1)
+
 
 
 # -------------------------------------------------
