@@ -175,8 +175,9 @@ class SaladFaissGPSDB:
         images: torch.Tensor,          # [B,C,H,W]
         weighted: bool = True,
         eps: float = 1e-6,
-        return_numpy: bool = False,
-    ) -> Union[torch.Tensor, np.ndarray]:
+        return_numpy: bool = True,
+        return_matches: bool = False
+    ):
         """
         Batch version of predict_gps.
 
@@ -253,10 +254,17 @@ class SaladFaissGPSDB:
             pred = (gps * w[:, None]).sum(axis=0)  # [2]
             preds_np[b] = pred
 
-        if return_numpy:
-            return preds_np
+        if return_matches:
+            if return_numpy:
+                return preds_np, matches
 
-        return torch.from_numpy(preds_np).to(device=device, dtype=torch.float32)
+            return torch.from_numpy(preds_np).to(device=device, dtype=torch.float32), matches
+        else:
+            if return_numpy:
+                return preds_np
+
+            return torch.from_numpy(preds_np).to(device=device, dtype=torch.float32)
+
 
 
     # -----------------------------
