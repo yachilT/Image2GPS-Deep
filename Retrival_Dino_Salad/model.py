@@ -301,4 +301,5 @@ class SaladFaissGPSDB:
         obj.index = faiss.read_index(os.path.join(folder, "index.faiss"))
         obj.dim = payload["dim"]
         obj.gps_list = [tuple(x) for x in payload["gps"]]
+        print(f"Loaded {len(obj.gps_list)} pictures.")
         return obj
