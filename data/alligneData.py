@@ -104,7 +104,7 @@ def manual_csv_gps_fixer():
 
         # 3. Handle User Input
         print(f"\n--- Index {img_idx} ---")
-        print(f"Original: {orig_lat}, {orig_lon}")
+        print(f"Original: {orig_lon}, {orig_lat}")
         val = input("Paste 'New Lon, New Lat' (s: skip, q: quit): ").strip()
 
         if val.lower() == 'q': 
