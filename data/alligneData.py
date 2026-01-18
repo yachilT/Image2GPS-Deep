@@ -105,7 +105,7 @@ def manual_csv_gps_fixer():
         # 3. Handle User Input
         print(f"\n--- Index {img_idx} ---")
         print(f"Original: {orig_lat}, {orig_lon}")
-        val = input("Paste 'New Lat, New Lon' (s: skip, q: quit): ").strip()
+        val = input("Paste 'New Lon, New Lat' (s: skip, q: quit): ").strip()
 
         if val.lower() == 'q': 
             break
@@ -114,7 +114,7 @@ def manual_csv_gps_fixer():
             continue
 
         try:
-            new_lat, new_lon = map(float, val.split(','))
+            new_lon, new_lat = map(float, val.split(','))
             
             # Update Dataframe in memory
             df.loc[df['Index'] == img_idx, 'Latitude'] = new_lat
