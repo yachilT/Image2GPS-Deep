@@ -1,5 +1,5 @@
 import os
-import cv2
+from PIL import Image, ImageOps
 import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -78,9 +78,12 @@ def manual_csv_gps_fixer():
             continue
 
         # 1. Show Image
-        img_raw = cv2.imread(str(img_path))
-        if img_raw is not None:
-            ax_img.imshow(cv2.cvtColor(img_raw, cv2.COLOR_BGR2RGB))
+        try:
+            img_raw = Image.open(str(img_path))
+            img_raw = ImageOps.exif_transpose(img_raw).convert('RGB')
+            ax_img.imshow(img_raw)
+        except (FileNotFoundError, OSError):
+            pass
         ax_img.set_title(f"Index: {img_idx}\nFile: {img_path.name}")
         ax_img.axis('off')
 
