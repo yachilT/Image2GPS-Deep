@@ -1,8 +1,10 @@
 data/indexed_photos/*
 data/snapshots/*
+data/18.1.26/*
 salad_faiss_db*
 __pycache__/
 trained_models/*
 *.sbatch
 jobs/*
 jobs
+dataset_root/*
