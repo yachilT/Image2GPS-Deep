@@ -1,5 +1,5 @@
 from typing import Optional
-from Retrival_Dino_Salad.model import Match
+from architectures.dino_faiss import Match
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from tqdm import tqdm

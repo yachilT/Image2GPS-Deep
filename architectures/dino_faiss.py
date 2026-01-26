@@ -48,6 +48,7 @@ class SaladFaissGPSDB:
         self.model = model.eval()
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
+        self.method = "consensus-weighted"
 
         # If using cosine similarity, you almost always want normalization.
         if use_cosine and not normalize:
@@ -173,7 +174,6 @@ class SaladFaissGPSDB:
     def predict_gps(
         self,
         images: torch.Tensor,          # [B,C,H,W]
-        weighted: bool = True,
         eps: float = 1e-6,
         return_numpy: bool = True,
         return_matches: bool = False
@@ -181,22 +181,22 @@ class SaladFaissGPSDB:
         """
         Batch version of predict_gps.
 
+        Behavior controlled by self.method:
+        - "consensus-weighted": score-weight * GPS-consensus weights (your original logic)
+        - "mean": simple mean of the k neighbor GPS points (no score weights)
+
         Returns:
-            preds: [B,2] (lat, lon)
+            preds: [B,2] (lat, lon) in numpy (default) or torch
         """
         if images.dim() == 3:
-            # allow single image [C,H,W] -> [1,C,H,W]
             images = images.unsqueeze(0)
         if images.dim() != 4:
             raise ValueError(f"Expected images [B,C,H,W] (or [C,H,W]), got {tuple(images.shape)}")
 
-        # We'll compute in numpy (your current logic uses numpy + python haversine)
-        # and return torch on the same device by default.
         device = images.device
         B = images.shape[0]
 
         def haversine_m_np(lat1, lon1, lat2, lon2):
-            # vectorized haversine for numpy arrays
             R = 6371000.0
             lat1 = np.radians(lat1)
             lon1 = np.radians(lon1)
@@ -208,63 +208,70 @@ class SaladFaissGPSDB:
             c = 2.0 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
             return R * c
 
+        method = getattr(self, "method", "consensus-weighted")  # default if missing
+        if method == "conceusus-weighted":
+            # keep backward-compat typo if you already used it somewhere
+            method = "consensus-weighted"
+
         preds_np = np.zeros((B, 2), dtype=np.float64)
+        matches_last = None  # for return_matches behavior (same as your original)
 
         for b in range(B):
-            matches = self.query_image(images[b])  # keeps your retrieval pipeline unchanged
+            matches = self.query_image(images[b])
+            matches_last = matches
+
             if len(matches) == 0:
                 raise RuntimeError(f"No matches found for batch index {b} (index empty?).")
 
             gps = np.array([m.gps for m in matches], dtype=np.float64)  # [k,2]
             k_eff = gps.shape[0]
 
-            # unweighted or single match
-            if (not weighted) or k_eff == 1:
-                pred = gps.mean(axis=0)
-                preds_np[b] = pred
+            # -------- method: mean --------
+            if method == "mean" or k_eff == 1:
+                preds_np[b] = gps.mean(axis=0)
                 continue
 
-            scores = np.array([m.score for m in matches], dtype=np.float64)
+            # -------- method: consensus-weighted (your original logic) --------
+            if method == "consensus-weighted":
+                scores = np.array([m.score for m in matches], dtype=np.float64)
 
-            # ---- 1) Score-based weights ----
-            if self.use_cosine:
-                w_score = scores - scores.min()
-                w_score = w_score + eps
-            else:
-                w_score = 1.0 / (scores + eps)
+                # 1) Score-based weights
+                if getattr(self, "use_cosine", False):
+                    w_score = scores - scores.min()
+                    w_score = w_score + eps
+                else:
+                    w_score = 1.0 / (scores + eps)
 
-            # ---- 2) GPS-consensus weights (leave-one-out + robust scale) ----
-            total = gps.sum(axis=0)  # [2]
-            # leave-one-out mean for each i: (total - gps[i])/(k-1)
-            denom = max(k_eff - 1, 1)
-            mu_loo = (total[None, :] - gps) / denom  # [k,2]
+                # 2) GPS-consensus weights (leave-one-out + robust scale)
+                total = gps.sum(axis=0)  # [2]
+                denom = max(k_eff - 1, 1)
+                mu_loo = (total[None, :] - gps) / denom  # [k,2]
 
-            d = haversine_m_np(
-                gps[:, 0], gps[:, 1],
-                mu_loo[:, 0], mu_loo[:, 1],
-            )  # [k]
+                d = haversine_m_np(
+                    gps[:, 0], gps[:, 1],
+                    mu_loo[:, 0], mu_loo[:, 1],
+                )  # [k]
 
-            scale = np.median(d) + eps
-            w_gps = np.exp(- (d / scale) ** 2) + eps
+                scale = np.median(d) + eps
+                w_gps = np.exp(- (d / scale) ** 2) + eps
 
-            # ---- 3) Combine and normalize ----
-            w = w_score * w_gps
-            w = w / (w.sum() + eps)
+                # 3) Combine and normalize
+                w = w_score * w_gps
+                w = w / (w.sum() + eps)
 
-            pred = (gps * w[:, None]).sum(axis=0)  # [2]
-            preds_np[b] = pred
+                preds_np[b] = (gps * w[:, None]).sum(axis=0)
+                continue
+
+            raise ValueError(f"Unknown self.method={method!r}. Use 'consensus-weighted' or 'mean'.")
 
         if return_matches:
             if return_numpy:
-                return preds_np, matches
+                return preds_np, matches_last
+            return torch.from_numpy(preds_np).to(device=device, dtype=torch.float32), matches_last
 
-            return torch.from_numpy(preds_np).to(device=device, dtype=torch.float32), matches
-        else:
-            if return_numpy:
-                return preds_np
-
-            return torch.from_numpy(preds_np).to(device=device, dtype=torch.float32)
-
+        if return_numpy:
+            return preds_np
+        return torch.from_numpy(preds_np).to(device=device, dtype=torch.float32)
 
 
     # -----------------------------

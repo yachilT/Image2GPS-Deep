@@ -1,33 +1,34 @@
-import csv
+import pandas as pd
 
-INPUT_CSV = "data/corrected_photo_locations.csv"
-OUTPUT_TXT = "data/gt.csv"  # change if you want
+INPUT_CSV = "data/photo_locations.csv"
+OUTPUT_CSV = "data/gt_corrupted.csv"
 
 def main():
-    rows_out = []
+    # Read input CSV
+    df = pd.read_csv(INPUT_CSV, encoding="utf-8-sig")
 
-    with open(INPUT_CSV, "r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        required = {"Index", "Latitude", "Longitude"}
-        missing = required - set(reader.fieldnames or [])
-        if missing:
-            raise ValueError(f"gt.csv missing columns: {missing}. Found: {reader.fieldnames}")
+    # Validate required columns
+    required_cols = {"Index", "Latitude", "Longitude"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing columns: {missing}. Found: {list(df.columns)}")
 
-        for r in reader:
-            idx = str(r["Index"]).strip()
-            lat = str(r["Latitude"]).strip()
-            lon = str(r["Longitude"]).strip()
+    # Clean and construct output
+    df = df[["Index", "Latitude", "Longitude"]].dropna()
+    df["Index"] = df["Index"].astype(str).str.strip()
+    df["Latitude"] = df["Latitude"].astype(str).str.strip()
+    df["Longitude"] = df["Longitude"].astype(str).str.strip()
 
-            if not idx or not lat or not lon:
-                continue
+    # Create image_name column
+    df["image_name"] = df["Index"] + ".jpg"
 
-            image_name = f"{idx}.jpg"
-            rows_out.append(f"{image_name} {lat} {lon}")
+    # Reorder columns exactly as requested
+    df_out = df[["Index", "image_name", "Latitude", "Longitude"]]
 
-    with open(OUTPUT_TXT, "w", encoding="utf-8") as f:
-        f.write("\n".join(rows_out) + ("\n" if rows_out else ""))
+    # Write output
+    df_out.to_csv(OUTPUT_CSV, index=False)
 
-    print(f"[OK] Wrote {len(rows_out)} lines to {OUTPUT_TXT}")
+    print(f"[OK] Wrote {len(df_out)} rows to {OUTPUT_CSV}")
 
 if __name__ == "__main__":
     main()
