@@ -10,6 +10,8 @@ import contextily as ctx
 from pyproj import Transformer
 from preprocess import GPSRectNorm
 from private_utils import haversine_distance
+import pandas as pd
+import geopandas as gpd
 
 transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857")
 
@@ -163,6 +165,19 @@ def visualize_model_predictions(model, dataset, gps_norm: GPSRectNorm, num_sampl
     plt.tight_layout()
     plt.show()
 
+def plot_locations_from_csv(file_path):
+    df = pd.read_csv(file_path)
+    gdf = gpd.GeoDataFrame(
+        df,
+        geometry=gpd.points_from_xy(df['Longitude'], df['Latitude']),
+        crs="EPSG:4326"
+    )
+    gdf_mercator = gdf.to_crs(epsg=3857)
+    fig, ax = plt.subplots(figsize=(12, 12))
+    gdf_mercator.plot(ax=ax, color='red', markersize=50, alpha=0.8, edgecolor='k')
+    ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik)
+    ax.set_axis_off()
+    plt.show()
 
     
 def _to_numpy_image(img, mean=None, std=None):
