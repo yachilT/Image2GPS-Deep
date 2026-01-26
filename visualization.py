@@ -1,5 +1,3 @@
-from typing import Optional
-from Retrival_Dino_Salad.model import Match
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from tqdm import tqdm
