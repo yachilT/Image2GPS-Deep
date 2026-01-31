@@ -1,0 +1,53 @@
+# ===============================
+# Core numeric & data handling
+# ===============================
+numpy==1.26.4
+pandas>=2.0
+scipy>=1.10
+scikit-learn>=1.3
+tqdm>=4.60
+
+# ===============================
+# Plotting & visualization
+# ===============================
+matplotlib>=3.7
+
+# ===============================
+# Image processing
+# ===============================
+Pillow>=10.0
+opencv-python>=4.8
+
+# ===============================
+# PyTorch stack
+# ===============================
+torch==2.1.2
+torchvision==0.16.2
+torchaudio==2.1.2
+
+# ===============================
+# Retrieval / similarity search
+# ===============================
+faiss-cpu>=1.7
+
+# ===============================
+# Geospatial utilities
+# ===============================
+geopandas>=0.14
+geopy>=2.4
+shapely>=2.0
+pyproj>=3.6
+
+# ===============================
+# Training utilities (used in notebooks)
+# ===============================
+pytorch-lightning==2.1.2
+torchmetrics==1.2.0
+pytorch-metric-learning==2.3.0
+
+# ===============================
+# Misc utilities
+# ===============================
+gdown>=5.0
+requests>=2.31
+PyYAML>=6.0

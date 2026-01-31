@@ -90,7 +90,7 @@ def process_folder(source_folder, target_folder, output_csv):
 
 def main():
     # --- SETTINGS ---
-    src = "snapshots/11.1.26-Roi" 
+    src = "snapshots/18.1.26-Tom" 
     dst = "./indexed_photos"
     csv_name = "photo_locations.csv"
 
