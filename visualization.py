@@ -71,7 +71,7 @@ def _plot_map_panel(ax, gt_merc, pred_merc, err_m=None, nn_mercs=None, pad_m=50,
         ax.set_title(f"Error: {err_m:.2f} (m)", fontsize=18)
     ax.axis("off")
 
-def visualize_model_predictions(model, dataset, gps_norm: GPSRectNorm, num_samples=12, device='cuda'):
+def visualize_model_predictions(model, dataset, gps_norm: GPSRectNorm, num_samples=12):
     IMG_MEAN=[0.485, 0.456, 0.406]
     IMG_STD = [0.229, 0.224, 0.225]
     
@@ -94,8 +94,10 @@ def visualize_model_predictions(model, dataset, gps_norm: GPSRectNorm, num_sampl
     gt_batch = np.stack([gt.cpu().numpy() for gt in gt_list]) # (B, 2)
     pred_batch = None
     
+    model_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     with torch.no_grad():
-        images_tensor = images_tensor.to(device)
+        images_tensor = images_tensor.to(model_device)
         print("predicting...")
         pred_batch = model.predict_gps(images_tensor)
 
@@ -117,8 +119,8 @@ def visualize_model_predictions(model, dataset, gps_norm: GPSRectNorm, num_sampl
     errors_m = haversine_distance(gt_GPS_batch, pred_GPS_batch)
 
     # moving images to from normalzied form
-    mean = torch.tensor(IMG_MEAN).view(1, 3, 1, 1).to(device)
-    std = torch.tensor(IMG_STD).view(1, 3, 1, 1).to(device)
+    mean = torch.tensor(IMG_MEAN).view(1, 3, 1, 1).to(model_device)
+    std = torch.tensor(IMG_STD).view(1, 3, 1, 1).to(model_device)
     images_tensor = images_tensor * std + mean
     image_b = images_tensor.permute(0, 2, 3, 1).cpu().numpy()
     
@@ -231,7 +233,7 @@ def plot_queries_with_topk_matches_and_map(
         orig_idx = test_dataset.indices[row] if hasattr(test_dataset, "indices") else row
 
         with torch.no_grad():
-            pred_coords, matches = db.predict_gps(query_img, weighted=weighted, return_matches=True)
+            pred_coords, matches = db.predict_gps(query_img, return_matches=True)
 
         pred_coords = GPS_norm.decode_np(pred_coords)
         gt_coords = GPS_norm.decode_np(gt_coords_n)

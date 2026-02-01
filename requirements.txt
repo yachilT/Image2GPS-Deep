@@ -37,6 +37,7 @@ geopandas>=0.14
 geopy>=2.4
 shapely>=2.0
 pyproj>=3.6
+contextily>=2.2
 
 # ===============================
 # Training utilities (used in notebooks)
